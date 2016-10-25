@@ -1,0 +1,12 @@
+dresses_length_long
+dresses_length_short
+dresses_sleeve_half
+dresses_sleeve_long
+dresses_sleeve_oneshoulder
+dresses_sleeve_short
+dresses_sleeve_sleeveless
+dresses_type_kneeloose
+dresses_type_kneetight
+dresses_type_longloose
+dresses_type_shortloose
+dresses_type_shorttight

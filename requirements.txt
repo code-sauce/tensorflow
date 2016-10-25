@@ -1,0 +1,9 @@
+# since bazel is not available for redhat/centos,
+# build bazel from C++ source needs Java8 or more
+#tensorflow==0.10.0 # wheel should be in sr wheelhouse
+numpy
+ipdb
+ipython
+NearPy==1.0.0
+Jinja2==2.8
+protobuf==3.0.0

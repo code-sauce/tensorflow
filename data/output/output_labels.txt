@@ -1,0 +1,4 @@
+bags
+tops
+shoes
+dresses
