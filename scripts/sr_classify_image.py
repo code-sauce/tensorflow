@@ -135,9 +135,9 @@ def run_inference_on_images(sess, image, doc_id, name, description, label_to_fin
         ):
             print(doc_id, name, image, score)
             with open('/Users/saurabhjain/Desktop/potentialdresses.csv', 'a') as csvfile:
-                dress_writer = csv.writer(csvfile, dialect='excel', encoding='utf-8',
-                                          delimiter=",", quotechar="|", quoting=csv.QUOTE_MINIMAL)
-                dress_writer.writerow([doc_id, name, image, score])
+                dress_writer = csv.writer(csvfile, dialect='excel', delimiter=",",
+                                          quotechar="|", quoting=csv.QUOTE_MINIMAL)
+                dress_writer.writerow([doc_id, name.encode("utf8"), image, score])
         if (
                 human_string == "tops"
                 and score > LABEL_MATCH_THRESHOLD
@@ -197,7 +197,11 @@ def get_batch():
 
 
 def dress_filter_outs(name, description):
-    if 'dress' in name.lower() or 'dress' in description.lower():
+    if (
+            ('dress' in name.lower() or 'dress' in description.lower())
+            and 'skirt' not in name.lower()
+            and 'top' not in name.lower()
+    ):
         return True
     return False
 
@@ -214,7 +218,10 @@ def main():
         image_tuples = get_batch()
         while image_tuples:
             for image_url, doc_id, name, description in image_tuples.next():
-                run_inference_on_images(sess, image_url, doc_id, name, description)
+                try:
+                    run_inference_on_images(sess, image_url, doc_id, name, description)
+                except:
+                    logging.exception("Error running inference on image: %s" % doc_id)
             image_tuples = get_batch()
 
 
