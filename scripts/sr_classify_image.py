@@ -42,6 +42,7 @@ import requests
 import csv
 import sys
 import tarfile
+import boto.dynamodb
 
 import numpy as np
 import logging
@@ -84,7 +85,7 @@ def create_graph():
         _ = tf.import_graph_def(graph_def, name='')
 
 
-def run_inference_on_images(sess, image, doc_id, name, description, label_to_find="dresses"):
+def run_inference_on_images(sess, image, doc_id, name, description, table, label_to_find="dresses"):
     """Runs inference on an image.
 
     Args:
@@ -110,7 +111,6 @@ def run_inference_on_images(sess, image, doc_id, name, description, label_to_fin
     # 'DecodeJpeg/contents:0': A tensor containing a string providing JPEG
     #   encoding of the image.
     # Runs the softmax tensor by feeding the image_data as input to the graph.
-
     softmax_tensor = sess.graph.get_tensor_by_name('final_result:0')
     feature_tensor = sess.graph.get_tensor_by_name('pool_3:0')  # ADDED
 
@@ -130,23 +130,31 @@ def run_inference_on_images(sess, image, doc_id, name, description, label_to_fin
 
         if (
                 human_string == "dresses"
-                and score > LABEL_MATCH_THRESHOLD
                 and dress_filter_outs(name, description)
         ):
-            print(doc_id, name, image, score)
-            with open('/Users/saurabhjain/Desktop/potentialdresses.csv', 'a') as csvfile:
-                dress_writer = csv.writer(csvfile, dialect='excel', delimiter=",",
-                                          quotechar="|", quoting=csv.QUOTE_MINIMAL)
-                dress_writer.writerow([doc_id, name.encode("utf8"), image, score])
-        if (
-                human_string == "tops"
-                and score > LABEL_MATCH_THRESHOLD
-                and tops_filter_outs(name, description)
-        ):
-            print(doc_id, name, image, score)
-            with open('/Users/saurabhjain/Desktop/potentialtops.csv', 'a') as csvfile:
-                dress_writer = csv.writer(csvfile, delimiter=",", quotechar="|", quoting=csv.QUOTE_MINIMAL)
-                dress_writer.writerow([doc_id, name, image, score])
+            if score > LABEL_MATCH_THRESHOLD:
+                print(doc_id, name, image, score)
+                item = table.new_item(hash_key=doc_id, attrs={'category': 'clothing|dresses', 'category_confidence': str(score)})
+                item.put()
+                with open('/Users/sjain/Desktop/potentialdresses.csv', 'a') as csvfile:
+                    dress_writer = csv.writer(csvfile, dialect='excel', delimiter=",",
+                                              quotechar="|", quoting=csv.QUOTE_MINIMAL)
+                    dress_writer.writerow([doc_id, name.encode("utf8"), image, score])
+            else:
+                print(doc_id, name, image, score)
+                with open('/Users/sjain/Desktop/potentialdresses-lowconfidence.csv', 'a') as csvfile:
+                    dress_writer = csv.writer(csvfile, dialect='excel', delimiter=",",
+                                              quotechar="|", quoting=csv.QUOTE_MINIMAL)
+                    dress_writer.writerow([doc_id, name.encode("utf8"), image, score])
+        # if (
+        #         human_string == "tops"
+        #         and score > LABEL_MATCH_THRESHOLD
+        #         and tops_filter_outs(name, description)
+        # ):
+        #     print(doc_id, name, image, score)
+        #     with open('/Users/sjain/Desktop/potentialtops.csv', 'a') as csvfile:
+        #         dress_writer = csv.writer(csvfile, delimiter=",", quotechar="|", quoting=csv.QUOTE_MINIMAL)
+        #         dress_writer.writerow([doc_id, name, image, score])
 
         print('[%s, %s] %s (score = %.5f)' % (doc_id, name, human_string, score))
 
@@ -170,13 +178,16 @@ def get_batch():
     Returns: a list of tuples [(docid, imageurl), ....]
     """
     s = solr.SolrConnection('http://solr-prod.s-9.us:8983/solr/shoprunner')
+    fq = set()
+    fq.add('name_search:dress')
     images = []
     batch = 0
+
     q = "category_all:clothing"
-    results = s.query(q, fields=['image_url', 'id', 'name', 'description'], rows=BATCH_SIZE, start=batch*BATCH_SIZE).results
+    results = s.query(q, fq=fq, fields=['image_url', 'id', 'name', 'description'], rows=BATCH_SIZE, start=batch*BATCH_SIZE).results
     while len(results) > 0:
         s = solr.SolrConnection('http://solr-prod.s-9.us:8983/solr/shoprunner')
-        results = s.query(q, fields=['image_url', 'id', 'name', 'description'], rows=BATCH_SIZE, start=batch*BATCH_SIZE).results
+        results = s.query(q, fq=fq, fields=['image_url', 'id', 'name', 'description'], rows=BATCH_SIZE, start=batch*BATCH_SIZE).results
         batch += 1
         image_sets = [(x['image_url'], x['id'], x['name'], x['description']) for x in results]
         print('results received from SOLR from %s to %s' % (((batch-1)*BATCH_SIZE), batch*BATCH_SIZE))
@@ -217,10 +228,12 @@ def main():
         create_graph()
         image_tuples = get_batch()
         while image_tuples:
+            conn = boto.dynamodb.connect_to_region('us-east-1', aws_access_key_id='', aws_secret_access_key='')
+            table = conn.get_table('product_suggested_information_sjain')
             for image_url, doc_id, name, description in image_tuples.next():
                 try:
-                    run_inference_on_images(sess, image_url, doc_id, name, description)
-                except:
+                    run_inference_on_images(sess, image_url, doc_id, name, description, table)
+                except Exception as ex:
                     logging.exception("Error running inference on image: %s" % doc_id)
             image_tuples = get_batch()
 
