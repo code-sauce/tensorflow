@@ -31,6 +31,7 @@ to use this script to perform image recognition.
 https://tensorflow.org/tutorials/image_recognition/
 """
 
+# -*- coding: utf-8 -*-
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -43,14 +44,15 @@ import csv
 import sys
 import tarfile
 import boto.dynamodb
-
+import sqlite3 as lite
 import numpy as np
 import logging
 from six.moves import urllib
 import tensorflow as tf
-
+import argparse
 FLAGS = tf.app.flags.FLAGS
 BATCH_SIZE = 1000
+COMMIT_BATCH_SIZE = 100
 MODULE_PATH = os.path.abspath(os.path.split(__file__)[0])
 PROJECT_PATH = "/".join(MODULE_PATH.split("/")[:-1])
 NUM_TOP_PREDICTIONS = 5
@@ -65,6 +67,7 @@ LABEL_MATCH_THRESHOLD = 0.75
 tf.app.flags.DEFINE_integer('num_top_predictions', 5,
                             """Display this many predictions.""")
 
+DATA_DIR = None
 
 def get_best_sr_image_url(image_urls):
     for image in image_urls:
@@ -85,7 +88,7 @@ def create_graph():
         _ = tf.import_graph_def(graph_def, name='')
 
 
-def run_inference_on_images(sess, image, doc_id, name, description, table, label_to_find="dresses"):
+def run_inference_on_images(sess, image, doc_id, name, description, partner_code, table=None, cursor=None, label_to_find="dresses"):
     """Runs inference on an image.
 
     Args:
@@ -121,7 +124,7 @@ def run_inference_on_images(sess, image, doc_id, name, description, table, label
     feature_set = sess.run(feature_tensor,
                            {'DecodeJpeg/contents:0': image_data})  # ADDED
     feature_set = np.squeeze(feature_set)  # ADDED
-    print(feature_set)  # ADDED
+    # print(feature_set)  # ADDED
     top_k = predictions.argsort()[-NUM_TOP_PREDICTIONS:][::-1]
     for node_id in top_k:
         # human_string = node_lookup.id_to_string(node_id)
@@ -132,31 +135,12 @@ def run_inference_on_images(sess, image, doc_id, name, description, table, label
                 human_string == "dresses"
                 and dress_filter_outs(name, description)
         ):
-            if score > LABEL_MATCH_THRESHOLD:
-                print(doc_id, name, image, score)
-                item = table.new_item(hash_key=doc_id, attrs={'category': 'clothing|dresses', 'category_confidence': str(score)})
-                item.put()
-                with open('/Users/sjain/Desktop/potentialdresses.csv', 'a') as csvfile:
-                    dress_writer = csv.writer(csvfile, dialect='excel', delimiter=",",
-                                              quotechar="|", quoting=csv.QUOTE_MINIMAL)
-                    dress_writer.writerow([doc_id, name.encode("utf8"), image, score])
-            else:
-                print(doc_id, name, image, score)
-                with open('/Users/sjain/Desktop/potentialdresses-lowconfidence.csv', 'a') as csvfile:
-                    dress_writer = csv.writer(csvfile, dialect='excel', delimiter=",",
-                                              quotechar="|", quoting=csv.QUOTE_MINIMAL)
-                    dress_writer.writerow([doc_id, name.encode("utf8"), image, score])
-        # if (
-        #         human_string == "tops"
-        #         and score > LABEL_MATCH_THRESHOLD
-        #         and tops_filter_outs(name, description)
-        # ):
-        #     print(doc_id, name, image, score)
-        #     with open('/Users/sjain/Desktop/potentialtops.csv', 'a') as csvfile:
-        #         dress_writer = csv.writer(csvfile, delimiter=",", quotechar="|", quoting=csv.QUOTE_MINIMAL)
-        #         dress_writer.writerow([doc_id, name, image, score])
+          #  if score > LABEL_MATCH_THRESHOLD:
+            print(doc_id, name, image, score)
 
-        print('[%s, %s] %s (score = %.5f)' % (doc_id, name, human_string, score))
+            cursor.execute(
+                "INSERT INTO %s VALUES ('%s', '%s', '%s', %s, CURRENT_TIMESTAMP)" % (table, doc_id, partner_code, 'clothing|dresses', score)
+            )
 
 
 def extract_features_and_files(image_data, sess):
@@ -184,15 +168,15 @@ def get_batch():
     batch = 0
 
     q = "category_all:clothing"
-    results = s.query(q, fq=fq, fields=['image_url', 'id', 'name', 'description'], rows=BATCH_SIZE, start=batch*BATCH_SIZE).results
+    results = s.query(q, fq=fq, fields=['image_url', 'id', 'name', 'description', 'partner_code'], rows=BATCH_SIZE, start=batch*BATCH_SIZE).results
     while len(results) > 0:
         s = solr.SolrConnection('http://solr-prod.s-9.us:8983/solr/shoprunner')
-        results = s.query(q, fq=fq, fields=['image_url', 'id', 'name', 'description'], rows=BATCH_SIZE, start=batch*BATCH_SIZE).results
+        results = s.query(q, fq=fq, fields=['image_url', 'id', 'name', 'description', 'partner_code'], rows=BATCH_SIZE, start=batch*BATCH_SIZE).results
         batch += 1
-        image_sets = [(x['image_url'], x['id'], x['name'], x['description']) for x in results]
-        print('results received from SOLR from %s to %s' % (((batch-1)*BATCH_SIZE), batch*BATCH_SIZE))
+        image_sets = [(x['image_url'], x['id'], x['name'], x['description'], x['partner_code']) for x in results]
+        print('products: %s to %s' % (((batch-1)*BATCH_SIZE), batch*BATCH_SIZE))
         count = 0
-        for image_set, doc_id, name, description in image_sets:
+        for image_set, doc_id, name, description, partner_code in image_sets:
             count += 1
             # has all resolutions. we pick the biggest one for best match (hopefully?)
             best_match_image_url = None
@@ -202,8 +186,7 @@ def get_batch():
                     break
             if not best_match_image_url:
                 continue
-            images.append((best_match_image_url, doc_id, name, description))
-        print('yielding')
+            images.append((best_match_image_url, doc_id, name, description, partner_code))
         yield images
 
 
@@ -224,19 +207,36 @@ def tops_filter_outs(name, description):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data-dir', help='Location to the data directory')
+    args = parser.parse_args()
+    if not args.data_dir:
+        raise Exception('Location to data directory is required.')
+    DATA_DIR = args.data_dir
+    table = "ProductCategory"
     with tf.Session() as sess:
         create_graph()
-        image_tuples = get_batch()
-        while image_tuples:
-            conn = boto.dynamodb.connect_to_region('us-east-1', aws_access_key_id='', aws_secret_access_key='')
-            table = conn.get_table('product_suggested_information_sjain')
-            for image_url, doc_id, name, description in image_tuples.next():
-                try:
-                    run_inference_on_images(sess, image_url, doc_id, name, description, table)
-                except Exception as ex:
-                    logging.exception("Error running inference on image: %s" % doc_id)
+        conn = lite.connect(os.path.join(DATA_DIR, 'suggested_dresses.db'))
+        cur = conn.cursor()
+        cur.execute("DROP TABLE IF EXISTS %s" % table)
+        cur.execute(
+            "CREATE TABLE %s(doc_id VARCHAR(50), partner_code VARCHAR(50), category VARCHAR(50), confidence DECIMAL, created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP , PRIMARY KEY(doc_id, partner_code))" % table
+            )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_partner_code ON %s (partner_code)" % table)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_created_date ON %s (partner_code)" % table)
+        with conn:
             image_tuples = get_batch()
-
+            while image_tuples:
+                for image_url, doc_id, name, description, partner_code in image_tuples.next():
+                    try:
+                        run_inference_on_images(
+                            sess, image_url, doc_id, name, description,
+                            partner_code, table=table,cursor=cur
+                        )
+                        conn.commit()
+                    except Exception as ex:
+                        logging.exception("Error running inference on image: %s" % doc_id)
+                image_tuples = get_batch()
 
 if __name__ == '__main__':
     main()
