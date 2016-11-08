@@ -58,7 +58,7 @@ COMMIT_BATCH_SIZE = 100
 MODULE_PATH = os.path.abspath(os.path.split(__file__)[0])
 PROJECT_PATH = "/".join(MODULE_PATH.split("/")[:-1])
 NUM_TOP_PREDICTIONS = 5
-PREDICTION_SQLITE_FILE_S3_LOCATION = 'net.shoprunner.stg.jarvis/tensorflow_recommendations'
+PREDICTION_SQLITE_FILE_S3_LOCATION = 'net.shoprunner.prd.jarvis/tensorflow_recommendations'
 LABELS = ["bags","womens intimates","shoes","mens suits","tops","mens shirt","womens outerwear","mens underwears","mens outerwear","bottoms","womens swimwear","dresses"]
 LABEL_MATCH_THRESHOLD = 0.75
 # classify_image_graph_def.pb:
