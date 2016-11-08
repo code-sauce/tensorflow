@@ -44,18 +44,21 @@ import csv
 import sys
 import tarfile
 import boto.dynamodb
+import boto
 import sqlite3 as lite
 import numpy as np
 import logging
 from six.moves import urllib
 import tensorflow as tf
 import argparse
+from datetime import datetime
 FLAGS = tf.app.flags.FLAGS
 BATCH_SIZE = 1000
 COMMIT_BATCH_SIZE = 100
 MODULE_PATH = os.path.abspath(os.path.split(__file__)[0])
 PROJECT_PATH = "/".join(MODULE_PATH.split("/")[:-1])
 NUM_TOP_PREDICTIONS = 5
+PREDICTION_SQLITE_FILE_S3_LOCATION = 'net.shoprunner.stg.jarvis/tensorflow_recommendations'
 LABELS = ["bags","womens intimates","shoes","mens suits","tops","mens shirt","womens outerwear","mens underwears","mens outerwear","bottoms","womens swimwear","dresses"]
 LABEL_MATCH_THRESHOLD = 0.75
 # classify_image_graph_def.pb:
@@ -88,7 +91,21 @@ def create_graph():
         _ = tf.import_graph_def(graph_def, name='')
 
 
-def run_inference_on_images(sess, image, doc_id, name, description, partner_code, table=None, cursor=None, label_to_find="dresses"):
+def _sync_sqlite_file_to_s3(file_path):
+    if datetime.now().minute == 0:  # every hour
+        # sync the sqlite file to a S3 bucket for Feed Loader to use
+        s3_file_suffix = datetime.now().strftime("%Y/%m/%d/%H")
+        s3_path = "%s/%s" % (PREDICTION_SQLITE_FILE_S3_LOCATION, s3_file_suffix)
+        conn = boto.connect_s3()
+        bucket = conn.create_bucket(s3_path)
+        with open(file_path, 'r') as f:
+            data = f.read()
+            key = bucket.new_key("suggestions.db")
+            key.set_contents_from_string(data)
+
+
+def run_inference_on_images(sess, image, doc_id, name, description, partner_code,
+                            table=None, cursor=None, file_path=None, label_to_find="dresses"):
     """Runs inference on an image.
 
     Args:
@@ -98,9 +115,7 @@ def run_inference_on_images(sess, image, doc_id, name, description, partner_code
     Returns:
       Nothing
     """
-    # if not tf.gfile.Exists(image):
-    #     tf.logging.fatal('File does not exist %s', image)
-    # image_data = tf.gfile.FastGFile(image, 'rb').read()
+    _sync_sqlite_file_to_s3(file_path)
     try:
         image_data = requests.get(image).content
     except Exception as ex:
@@ -211,7 +226,8 @@ def main():
     table = "ProductCategory"
     with tf.Session() as sess:
         create_graph()
-        conn = lite.connect(os.path.join(DATA_DIR, 'suggested_dresses.db'))
+        file_path = os.path.join(DATA_DIR, 'suggested_dresses.db')
+        conn = lite.connect(file_path)
         cur = conn.cursor()
         cur.execute("DROP TABLE IF EXISTS %s" % table)
         cur.execute(
@@ -227,7 +243,7 @@ def main():
                     try:
                         run_inference_on_images(
                             sess, image_url, doc_id, name, description,
-                            partner_code, table=table,cursor=cur
+                            partner_code, table=table,cursor=cur, file_path=file_path
                         )
                         conn.commit()
                     except Exception as ex:
