@@ -11,6 +11,4 @@ sudo bazel-bin/tensorflow/examples/image_retraining/retrain --image_dir /Users/s
 bazel-bin/tensorflow/examples/label_image/label_image --graph=/tmp/output_graph.pb --labels=data/labels_file.txt --output_layer=final_result --image=/Users/saurabhjain/Desktop/shoe.jpg
 
 #To label and write to sqlite file used for other ShopRunner systems
-python scripts/sr_classify_image.py --data-dir=/Users/saurabhjain/tensorflow/data_electronics --sqlite-file=/Users/saurabhjain/tensorflow/data_electronics/suggested_tv.db --label-to-find=tv --solr-category=electronics --threshold=0.8
-
-
+python scripts/sr_classify_image.py --data-dir=/Users/saurabhjain/tensorflow/data_electronics --sqlite-file=/Users/saurabhjain/tensorflow/data_electronics/suggested_tv.db --label-to-find=tv --solr-query=name_search:electronics --threshold=0.8

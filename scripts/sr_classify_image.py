@@ -179,16 +179,13 @@ def extract_features_and_files(image_data, sess):
     return features, files
 
 
-def get_batch(batch, solr_category):
+def get_batch(batch, solr_query):
     """
     Returns: a list of tuples [(docid, imageurl), ....]
     """
     s = solr.SolrConnection('http://solr-prod.s-9.us:8983/solr/shoprunner')
-    fq = set()
     images = []
-
-    q = "category_all:%s" % solr_category
-    results = s.query(q, fq=fq, fields=['image_url', 'id', 'name', 'description', 'partner_code'], rows=BATCH_SIZE, start=batch*BATCH_SIZE).results
+    results = s.query(solr_query, fields=['image_url', 'id', 'name', 'description', 'partner_code'], rows=BATCH_SIZE, start=batch*BATCH_SIZE).results
     image_sets = [(x['image_url'], x['id'], x['name'], x['description'], x['partner_code']) for x in results]
     print('products: %s to %s' % ((batch*BATCH_SIZE), (batch+1)*BATCH_SIZE))
     count = 0
@@ -228,7 +225,7 @@ def main():
     parser.add_argument('--sqlite-file', help='Sqlite file location where the results of categorization are written to and used later')
     parser.add_argument('--table-name', help='Sqlite table name')
     parser.add_argument('--label-to-find', help='Label to find')
-    parser.add_argument('--solr-category', help='SOLR category to look for the corpus and match the images')
+    parser.add_argument('--solr-query', help='SOLR query phrase to look for the corpus and match the images eg: name_search:iPhone')
     parser.add_argument('--threshold', help='Minimum threshold to match a label')
 
     args = parser.parse_args()
@@ -244,7 +241,7 @@ def main():
         table =  args.table_name or "ProductCategory"
         file_path = args.sqlite_file or 'suggested_dresses.db'
         label_to_find = args.label_to_find or 'dresses'
-        solr_category = args.solr_category or 'clothing'
+        solr_query = args.solr_query or '*:*'
         threshold = args.threshold or LABEL_MATCH_THRESHOLD
         conn = lite.connect(file_path)
         cur = conn.cursor()
@@ -259,7 +256,7 @@ def main():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_created_date ON %s (partner_code)" % table)
         batch = 0
         #with conn:
-        image_tuples = get_batch(batch, solr_category)
+        image_tuples = get_batch(batch, solr_query)
         while image_tuples:
             for image_url, doc_id, name, description, partner_code in image_tuples:
                 try:
@@ -273,7 +270,7 @@ def main():
                 except Exception as ex:
                     logging.exception("Error running inference on image: %s" % doc_id)
             batch+=1
-            image_tuples = get_batch(batch, solr_category)
+            image_tuples = get_batch(batch, solr_query)
 
             # sync the
             _sync_sqlite_file_to_s3(file_path)
