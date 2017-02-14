@@ -93,6 +93,10 @@ def create_graph(data_dir):
         _ = tf.import_graph_def(graph_def, name='')
 
 
+def _get_sqlite_db_name_from_file_path(file_path):
+    return file_path.split('/')[-1]
+
+
 def _sync_sqlite_file_to_s3(file_path):
     if datetime.now().minute == 0:  # every hour
         # sync the sqlite file to a S3 bucket for Feed Loader to use
@@ -102,12 +106,12 @@ def _sync_sqlite_file_to_s3(file_path):
         bucket = conn.create_bucket(s3_path)
         with open(file_path, 'r') as f:
             data = f.read()
-            key = bucket.new_key("suggestions.db")
+            key = bucket.new_key(_get_sqlite_db_name_from_file_path(file_path))
             key.set_contents_from_string(data)
 
 
 def run_inference_on_images(sess, image, doc_id, name, description, partner_code,
-                            table=None, cursor=None, file_path=None, label_to_find="dresses"):
+                            table=None, cursor=None, file_path=None, label_to_find="dresses", threshold=LABEL_MATCH_THRESHOLD):
     """Runs inference on an image.
 
     Args:
@@ -117,8 +121,6 @@ def run_inference_on_images(sess, image, doc_id, name, description, partner_code
     Returns:
       Nothing
     """
-    # TODO uncomment later
-    #_sync_sqlite_file_to_s3(file_path)
     try:
         image_data = requests.get(image).content
     except Exception as ex:
@@ -155,11 +157,11 @@ def run_inference_on_images(sess, image, doc_id, name, description, partner_code
                 human_string == label_to_find
                 and filter_output
         ):
-            if score > LABEL_MATCH_THRESHOLD:
+            if score > threshold:
                 print(doc_id, name, image, score)
 
                 cursor.execute(
-                    "INSERT INTO %s VALUES ('%s', '%s', '%s', %s, CURRENT_TIMESTAMP)" % (table, doc_id, partner_code, 'clothing|dresses', score)
+                    "INSERT INTO %s VALUES ('%s', '%s', '%s', %s, CURRENT_TIMESTAMP)" % (table, doc_id, partner_code, label_to_find, score)
                 )
 
 
@@ -227,6 +229,7 @@ def main():
     parser.add_argument('--table-name', help='Sqlite table name')
     parser.add_argument('--label-to-find', help='Label to find')
     parser.add_argument('--solr-category', help='SOLR category to look for the corpus and match the images')
+    parser.add_argument('--threshold', help='Minimum threshold to match a label')
 
     args = parser.parse_args()
 
@@ -242,7 +245,7 @@ def main():
         file_path = args.sqlite_file or 'suggested_dresses.db'
         label_to_find = args.label_to_find or 'dresses'
         solr_category = args.solr_category or 'clothing'
-
+        threshold = args.threshold or LABEL_MATCH_THRESHOLD
         conn = lite.connect(file_path)
         cur = conn.cursor()
         cur.execute("DROP TABLE IF EXISTS %s" % table)
@@ -263,7 +266,7 @@ def main():
                     run_inference_on_images(
                         sess, image_url, doc_id, name, description,
                         partner_code, table=table,cursor=cur, file_path=file_path,
-                        label_to_find=label_to_find
+                        label_to_find=label_to_find, threshold=threshold
                     )
 
                     conn.commit()
@@ -271,6 +274,9 @@ def main():
                     logging.exception("Error running inference on image: %s" % doc_id)
             batch+=1
             image_tuples = get_batch(batch, solr_category)
+
+            # sync the
+            _sync_sqlite_file_to_s3(file_path)
 
 if __name__ == '__main__':
     main()
