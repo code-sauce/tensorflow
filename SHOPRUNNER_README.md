@@ -1,7 +1,7 @@
 # https://www.tensorflow.org/versions/r0.9/how_tos/image_retraining/index.html
 
 # build the binary for retraining
-bazel build -c opt --copt=-mavx tensorflow/examples/image_retraining:retrain
+bazel build tensorflow/examples/image_retraining:retrain
 
 
 #To train:
