@@ -159,7 +159,6 @@ def run_inference_on_images(sess, image, doc_id, name, description, partner_code
         ):
             if score > threshold:
                 print(doc_id, name, image, score)
-
                 cursor.execute(
                     "INSERT INTO %s VALUES ('%s', '%s', '%s', %s, CURRENT_TIMESTAMP)" % (table, doc_id, partner_code, label_to_find, score)
                 )
@@ -242,7 +241,7 @@ def main():
         file_path = args.sqlite_file or 'suggested_dresses.db'
         label_to_find = args.label_to_find or 'dresses'
         solr_query = args.solr_query or '*:*'
-        threshold = args.threshold or LABEL_MATCH_THRESHOLD
+        threshold = float(args.threshold or LABEL_MATCH_THRESHOLD)
         conn = lite.connect(file_path)
         cur = conn.cursor()
         cur.execute("DROP TABLE IF EXISTS %s" % table)
@@ -258,6 +257,7 @@ def main():
         #with conn:
         image_tuples = get_batch(batch, solr_query)
         while image_tuples:
+
             for image_url, doc_id, name, description, partner_code in image_tuples:
                 try:
                     run_inference_on_images(
