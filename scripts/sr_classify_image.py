@@ -59,8 +59,6 @@ MODULE_PATH = os.path.abspath(os.path.split(__file__)[0])
 PROJECT_PATH = "/".join(MODULE_PATH.split("/")[:-1])
 NUM_TOP_PREDICTIONS = 5
 PREDICTION_SQLITE_FILE_S3_LOCATION = 'net.shoprunner.prd.jarvis/tensorflow_recommendations'
-LABELS = ["bags","womens intimates","shoes","mens suits","tops","mens shirt","womens outerwear","mens underwears","mens outerwear","bottoms","womens swimwear","dresses"]
-LABELS_ELECTRONICS = ['speakers','laptop computers','cell phones','headphones','tv','tablets','desktop computers','monitors','mp3 player']
 LABEL_MATCH_THRESHOLD = 0.5
 # classify_image_graph_def.pb:
 #   Binary representation of the GraphDef protocol buffer.
@@ -72,6 +70,16 @@ tf.app.flags.DEFINE_integer('num_top_predictions', 5,
                             """Display this many predictions.""")
 
 DATA_DIR = None
+
+def _get_labels_from_file(filepath):
+    """
+    The labels in the labels file generated while model creation is in a specific order.
+    """
+    labels = ''
+    with open(filepath) as f:
+        labels = f.read()
+    return filter(lambda x: x, labels.split('\n'))
+
 
 def get_best_sr_image_url(image_urls):
     for image in image_urls:
@@ -111,7 +119,8 @@ def _sync_sqlite_file_to_s3(file_path):
 
 
 def run_inference_on_images(sess, image, doc_id, name, description, partner_code,
-                            table=None, cursor=None, file_path=None, label_to_find="dresses", threshold=LABEL_MATCH_THRESHOLD):
+                            table=None, cursor=None, file_path=None, label_to_find="dresses",
+                             threshold=LABEL_MATCH_THRESHOLD, labels=None):
     """Runs inference on an image.
 
     Args:
@@ -146,8 +155,9 @@ def run_inference_on_images(sess, image, doc_id, name, description, partner_code
     feature_set = np.squeeze(feature_set)  # ADDED
     # print(feature_set)  # ADDED
     top_k = predictions.argsort()[-NUM_TOP_PREDICTIONS:][::-1]
+
     for node_id in top_k:
-        human_string = LABELS_ELECTRONICS[node_id]
+        human_string = labels[node_id]
         score = predictions[node_id]
         filter_output = True
         if label_to_find == 'dresses':
@@ -223,14 +233,19 @@ def main():
     parser.add_argument('--data-dir', help='Location to the data directory')
     parser.add_argument('--sqlite-file', help='Sqlite file location where the results of categorization are written to and used later')
     parser.add_argument('--table-name', help='Sqlite table name')
+    parser.add_argument('--label-file', help='Path to the file where labels are generated')
     parser.add_argument('--label-to-find', help='Label to find')
     parser.add_argument('--solr-query', help='SOLR query phrase to look for the corpus and match the images eg: name_search:iPhone')
     parser.add_argument('--threshold', help='Minimum threshold to match a label')
+    parser.add_argument('--sync-s3', help='Sync the classification results to S3')
+
 
     args = parser.parse_args()
 
     if not args.data_dir:
         raise Exception('Location to data directory is required.')
+    if not args.label_file:
+        raise Exception('Location to locate the output_labels.txt file')
 
     DATA_DIR = args.data_dir
 
@@ -242,6 +257,9 @@ def main():
         label_to_find = args.label_to_find or 'dresses'
         solr_query = args.solr_query or '*:*'
         threshold = float(args.threshold or LABEL_MATCH_THRESHOLD)
+        sync_s3 = args.sync_s3 or False
+        label_file = args.label_file
+        labels = _get_labels_from_file(label_file)
         conn = lite.connect(file_path)
         cur = conn.cursor()
         cur.execute("DROP TABLE IF EXISTS %s" % table)
@@ -263,7 +281,7 @@ def main():
                     run_inference_on_images(
                         sess, image_url, doc_id, name, description,
                         partner_code, table=table,cursor=cur, file_path=file_path,
-                        label_to_find=label_to_find, threshold=threshold
+                        label_to_find=label_to_find, threshold=threshold, labels=labels
                     )
 
                     conn.commit()
@@ -272,8 +290,8 @@ def main():
             batch+=1
             image_tuples = get_batch(batch, solr_query)
 
-            # sync the
-            _sync_sqlite_file_to_s3(file_path)
+            if sync_s3:
+                _sync_sqlite_file_to_s3(file_path)
 
 if __name__ == '__main__':
     main()
