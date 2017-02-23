@@ -119,7 +119,7 @@ def _sync_sqlite_file_to_s3(file_path):
 
 
 def run_inference_on_images(sess, image, doc_id, name, description, partner_code,
-                            table=None, cursor=None, file_path=None, label_to_find="dresses",
+                            table=None, cursor=None, file_path=None, labels_to_find=None,
                              threshold=LABEL_MATCH_THRESHOLD, labels=None):
     """Runs inference on an image.
 
@@ -160,17 +160,17 @@ def run_inference_on_images(sess, image, doc_id, name, description, partner_code
         human_string = labels[node_id]
         score = predictions[node_id]
         filter_output = True
-        if label_to_find == 'dresses':
+        if 'dresses' in labels_to_find:
             filter_output = filter_output and dress_filter_outs(name, description)
 
         if (
-                human_string == label_to_find
+                human_string in labels_to_find
                 and filter_output
         ):
             if score > threshold:
-                print(doc_id, name, image, score)
+                print(doc_id, name, image, human_string, score)
                 cursor.execute(
-                    "INSERT INTO %s VALUES ('%s', '%s', '%s', %s, CURRENT_TIMESTAMP)" % (table, doc_id, partner_code, label_to_find, score)
+                    "INSERT INTO %s VALUES ('%s', '%s', '%s', %s, CURRENT_TIMESTAMP)" % (table, doc_id, partner_code, human_string, score)
                 )
 
 
@@ -234,7 +234,7 @@ def main():
     parser.add_argument('--sqlite-file', help='Sqlite file location where the results of categorization are written to and used later')
     parser.add_argument('--table-name', help='Sqlite table name')
     parser.add_argument('--label-file', help='Path to the file where labels are generated')
-    parser.add_argument('--label-to-find', help='Label to find')
+    parser.add_argument('--labels-to-find', help='Label(s) to look for and classify. CSV separated if multiple labels')
     parser.add_argument('--solr-query', help='SOLR query phrase to look for the corpus and match the images eg: name_search:iPhone')
     parser.add_argument('--threshold', help='Minimum threshold to match a label')
     parser.add_argument('--sync-s3', help='Sync the classification results to S3')
@@ -254,12 +254,13 @@ def main():
 
         table =  args.table_name or "ProductCategory"
         file_path = args.sqlite_file or 'suggested_dresses.db'
-        label_to_find = args.label_to_find or 'dresses'
+        label_file = args.label_file
+        labels = _get_labels_from_file(label_file)
+        labels_to_find = args.labels_to_find.split(",") if args.labels_to_find else labels
         solr_query = args.solr_query or '*:*'
         threshold = float(args.threshold or LABEL_MATCH_THRESHOLD)
         sync_s3 = args.sync_s3 or False
-        label_file = args.label_file
-        labels = _get_labels_from_file(label_file)
+
         conn = lite.connect(file_path)
         cur = conn.cursor()
         cur.execute("DROP TABLE IF EXISTS %s" % table)
@@ -275,13 +276,12 @@ def main():
         #with conn:
         image_tuples = get_batch(batch, solr_query)
         while image_tuples:
-
             for image_url, doc_id, name, description, partner_code in image_tuples:
                 try:
                     run_inference_on_images(
                         sess, image_url, doc_id, name, description,
                         partner_code, table=table,cursor=cur, file_path=file_path,
-                        label_to_find=label_to_find, threshold=threshold, labels=labels
+                        labels_to_find=labels_to_find, threshold=threshold, labels=labels
                     )
 
                     conn.commit()
