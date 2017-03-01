@@ -1,9 +1,9 @@
 import os
 import shutil
 
-SOURCE_DATA_DIR = '/Users/saurabhjain/Downloads/electronics'
-TRAIN_DATA_DIR = '/Users/saurabhjain/tensorflow/data_electronics/train'
-VALIDATE_DATA_DIR = '/Users/saurabhjain/tensorflow/data_electronics/validate'
+SOURCE_DATA_DIR = '/Users/saurabhjain/Desktop/category-training-data/train'
+TRAIN_DATA_DIR = '/Users/saurabhjain/tensorflow/data_clothing/train'
+VALIDATE_DATA_DIR = '/Users/saurabhjain/tensorflow/data_clothing/validate'
 
 # make training and validate directory
 for root, dirs, files in os.walk(SOURCE_DATA_DIR, topdown=False):

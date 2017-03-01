@@ -22,6 +22,6 @@ python scripts/sr_classify_image.py  --data-dir=/home/ubuntu/tensorflow/tensorfl
 --label-file=/home/ubuntu/tensorflow/tensorflow/data_shoes/output/output_labels.txt \
 --solr-query="name_search:shoe OR name_search:boot OR name_search:sandal OR \
     name_search:flat OR name_search:pump OR name_search:oxford OR name_search:flip \
-    OR name_search:thong OR name_search:slipper OR name_search:loafer" \
---threshold=0.95
+    OR name_search:thong sandals OR name_search:slipper OR name_search:loafer" \
+--threshold=0.95 \
 --sqlite-file=suggested_shoes.db --sync-s3=y

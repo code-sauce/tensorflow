@@ -1,0 +1,9 @@
+speakers
+laptop computers
+tv
+headphones
+cell phones
+tablets
+desktop computers
+monitors
+mp3 player
